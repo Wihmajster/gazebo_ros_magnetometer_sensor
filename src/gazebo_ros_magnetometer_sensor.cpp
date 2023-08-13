@@ -155,6 +155,16 @@ namespace gazebo
       update_rate = 1.0;
       ROS_WARN_STREAM("missing <updateRateHZ>, set to: " << update_rate);
     }
+    // Load magnetic_field parameters
+    if (sdf->HasElement("magneticField"))
+    {
+      gazebo::physics::WorldPtr world = gazebo::physics::get_world(sensor->WorldName());
+      if (world){
+        auto magnetic_field = sdf->GetElement("magneticField")->Get<ignition::math::Vector3d>();
+        world->SetMagneticField(magnetic_field);
+        ROS_INFO_STREAM("Magnetic field: " << magnetic_field);
+      }
+    }
 
     return true;
   }
