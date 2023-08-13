@@ -13,157 +13,149 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * This code is based on the Gazebo ROS Magnetometer Sensor plugin.
+ * Original code repository: https://github.com/Darkproduct/gazebo_ros_magnetometer_sensor
+ *
+ * Modified versions of the original code are licensed under the same
+ * Apache License, Version 2.0.
 */
-/*
- * Desc: magnetometer ros interface.
- * Author: Johannes Bier
- * Date: 11 February 2020
- */
 
 #include <gazebo_ros_magnetometer_sensor/gazebo_ros_magnetometer_sensor.h>
 #include <gazebo/common/Events.hh>
 #include <gazebo/physics/physics.hh>
+#include <cmath>
+#include <ignition/math/Vector3.hh>
+#include <memory>
 
 GZ_REGISTER_SENSOR_PLUGIN(gazebo::GazeboRosMagnetometerSensor)
 
-gazebo::GazeboRosMagnetometerSensor::GazeboRosMagnetometerSensor(): 
-  SensorPlugin(),
-  sensor(nullptr),
-  node(nullptr)
-{}
-
-gazebo::GazeboRosMagnetometerSensor::~GazeboRosMagnetometerSensor()
+namespace gazebo
 {
-  if (connection.get())
+  GazeboRosMagnetometerSensor::GazeboRosMagnetometerSensor(): 
+    SensorPlugin()
+  {}
+
+  GazeboRosMagnetometerSensor::~GazeboRosMagnetometerSensor()
   {
-    connection.reset();
-    connection = event::ConnectionPtr();
+    if (node != nullptr)
+    {
+      node->shutdown();
+    }
   }
 
-  if (node != nullptr)
+  void GazeboRosMagnetometerSensor::Load(sensors::SensorPtr sensor_, sdf::ElementPtr sdf_)
   {
-    node->shutdown();
-    delete node;
-  }
-}
+    sdf=sdf_;
+    sensor = std::dynamic_pointer_cast<sensors::MagnetometerSensor>(sensor_);
 
-void gazebo::GazeboRosMagnetometerSensor::Load(gazebo::sensors::SensorPtr sensor_, sdf::ElementPtr sdf_)
-{
-  sdf=sdf_;
-  sensor=dynamic_cast<gazebo::sensors::MagnetometerSensor*>(sensor_.get());
+    if(sensor==nullptr)
+    {
+      ROS_FATAL("Error: Sensor pointer is NULL!");
+      return;
+    }
 
-  if(sensor==nullptr)
-  {
-    ROS_FATAL("Error: Sensor pointer is NULL!");
-    return;
-  }
+    sensor->SetActive(true);
 
-  sensor->SetActive(true);
+    if(!LoadParameters())
+    {
+      ROS_FATAL("Error Loading Parameters!");
+      return;
+    }
 
-  if(!LoadParameters())
-  {
-    ROS_FATAL("Error Loading Parameters!");
-    return;
-  }
+    if (!ros::isInitialized())
+    {
+      ROS_FATAL("ROS has not been initialized!");
+      return;
+    }
 
-  if (!ros::isInitialized()) //check if ros is initialized properly
-  {
-    ROS_FATAL("ROS has not been initialized!");
-    return;
-  }
+    node = std::make_unique<ros::NodeHandle>(this->robot_namespace);
 
-  node = new ros::NodeHandle(this->robot_namespace);
+    magnetometer_data_publisher = node->advertise<sensor_msgs::MagneticField>(topic_name,1);
+    connection = event::Events::ConnectWorldUpdateBegin([this](const common::UpdateInfo& info) {
+      UpdateChild(info);
+    });
 
-  magnetometer_data_publisher = node->advertise<sensor_msgs::MagneticField>(topic_name,1);
-
-  connection = gazebo::event::Events::ConnectWorldUpdateBegin(boost::bind(&GazeboRosMagnetometerSensor::UpdateChild, this, _1));
-
-  last_time = sensor->LastUpdateTime();
-}
-
-void gazebo::GazeboRosMagnetometerSensor::UpdateChild(const gazebo::common::UpdateInfo &/*_info*/)
-{
-  common::Time current_time = sensor->LastUpdateTime();
-
-  if(update_rate>0 && (current_time-last_time).Double() < 1.0/update_rate) //update rate check
-    return;
-
-  if(magnetometer_data_publisher.getNumSubscribers() > 0)
-  {
-    ignition::math::Vector3d field = sensor->MagneticField();
-
-    magnetometer_msg.magnetic_field.x = field.X();
-    magnetometer_msg.magnetic_field.y = field.Y();
-    magnetometer_msg.magnetic_field.z = field.Z();
-
-    //preparing message header
-    magnetometer_msg.header.frame_id   = body_name;
-    magnetometer_msg.header.stamp.sec  = current_time.sec;
-    magnetometer_msg.header.stamp.nsec = current_time.nsec;
-
-    //publishing data
-    magnetometer_data_publisher.publish(magnetometer_msg);
-
-    ros::spinOnce();
+    last_time = sensor->LastUpdateTime();
   }
 
-  last_time = current_time;
-}
-
-bool gazebo::GazeboRosMagnetometerSensor::LoadParameters()
-{
-  //loading parameters from the sdf file
-
-  //NAMESPACE
-  if (sdf->HasElement("robotNamespace"))
+  void GazeboRosMagnetometerSensor::UpdateChild(const common::UpdateInfo &/*_info*/)
   {
-    robot_namespace = sdf->Get<std::string>("robotNamespace") + "/";
-    ROS_INFO_STREAM("<robotNamespace> set to: " << robot_namespace);
-  }
-  else
-  {
-    std::string scoped_name = sensor->ParentName();
-    std::size_t it          = scoped_name.find("::");
+    common::Time current_time = sensor->LastUpdateTime();
 
-    robot_namespace = "/" + scoped_name.substr(0, it) + "/";
-    ROS_WARN_STREAM("missing <robotNamespace>, set to default: " << robot_namespace);
-  }
+    if (update_rate > 0 && (current_time - last_time).Double() < 1.0 / update_rate)
+    {
+      return;
+    }
 
-  //TOPIC
-  if (sdf->HasElement("topicName"))
-  {
-    topic_name = robot_namespace + sdf->Get<std::string>("topicName");
-    ROS_INFO_STREAM("<topicName> set to: " << topic_name);
-  }
-  else
-  {
-    topic_name = robot_namespace + "/mag_data";
-    ROS_WARN_STREAM("missing <topicName>, set to /namespace/default: " << topic_name);
+    if(magnetometer_data_publisher.getNumSubscribers() > 0)
+    {
+      ignition::math::Vector3d field = sensor->MagneticField();
+
+      magnetometer_msg.magnetic_field.x = field.X();
+      magnetometer_msg.magnetic_field.y = field.Y();
+      magnetometer_msg.magnetic_field.z = field.Z();
+
+      magnetometer_msg.header.frame_id   = body_name;
+      magnetometer_msg.header.stamp.sec  = current_time.sec;
+      magnetometer_msg.header.stamp.nsec = current_time.nsec;
+
+      magnetometer_data_publisher.publish(magnetometer_msg);
+
+      ros::spinOnce();
+    }
+
+    last_time = current_time;
   }
 
-  //BODY NAME
-  if (sdf->HasElement("frameName"))
+  bool GazeboRosMagnetometerSensor::LoadParameters()
   {
-    body_name = sdf->Get<std::string>("frameName");
-    ROS_INFO_STREAM("<frameName> set to: " << body_name);
-  }
-  else
-  {
-    ROS_FATAL("missing <frameName>, cannot proceed");
-    return false;
-  }
+    if (sdf->HasElement("robotNamespace"))
+    {
+      robot_namespace = sdf->Get<std::string>("robotNamespace") + "/";
+      ROS_INFO_STREAM("<robotNamespace> set to: " << robot_namespace);
+    }
+    else
+    {
+      std::string scoped_name = sensor->ParentName();
+      std::size_t it = scoped_name.find("::");
 
-  //UPDATE RATE
-  if (sdf->HasElement("updateRateHZ"))
-  {
-    update_rate = sdf->Get<double>("updateRateHZ");
-    ROS_INFO_STREAM("<updateRateHZ> set to: " << update_rate);
-  }
-  else
-  {
-    update_rate = 1.0;
-    ROS_WARN_STREAM("missing <updateRateHZ>, set to default: " << update_rate);
-  }
+      robot_namespace = "/" + scoped_name.substr(0, it) + "/";
+      ROS_WARN_STREAM("missing <robotNamespace>, set to: " << robot_namespace);
+    }
 
-  return true;
-}
+    if (sdf->HasElement("topicName"))
+    {
+      topic_name = robot_namespace + sdf->Get<std::string>("topicName");
+      ROS_INFO_STREAM("<topicName> set to: " << topic_name);
+    }
+    else
+    {
+      topic_name = robot_namespace + "/mag";
+      ROS_WARN_STREAM("missing <topicName>, set to: " << topic_name);
+    }
+
+    if (sdf->HasElement("frameName"))
+    {
+      body_name = sdf->Get<std::string>("frameName");
+      ROS_INFO_STREAM("<frameName> set to: " << body_name);
+    }
+    else
+    {
+      ROS_FATAL("missing <frameName>, cannot proceed");
+      return false;
+    }
+
+    if (sdf->HasElement("updateRateHZ"))
+    {
+      update_rate = sdf->Get<double>("updateRateHZ");
+      ROS_INFO_STREAM("<updateRateHZ> set to: " << update_rate);
+    }
+    else
+    {
+      update_rate = 1.0;
+      ROS_WARN_STREAM("missing <updateRateHZ>, set to: " << update_rate);
+    }
+
+    return true;
+  }
+} // namespace gazebo

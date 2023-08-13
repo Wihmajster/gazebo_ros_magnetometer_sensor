@@ -13,12 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * This code is based on the Gazebo ROS Magnetometer Sensor plugin.
+ * Original code repository: https://github.com/Darkproduct/gazebo_ros_magnetometer_sensor
+ *
+ * Modified versions of the original code are licensed under the same
+ * Apache License, Version 2.0.
 */
-/*
- * Desc: magnetometer ros interface.
- * Author: Johannes Bier
- * Date: 11 February 2020
- */
 
 #ifndef GAZEBO_ROS_MAGNETOMETER_SENSOR_H
 #define GAZEBO_ROS_MAGNETOMETER_SENSOR_H
@@ -29,6 +29,8 @@
 
 #include <ros/ros.h>
 #include <sensor_msgs/MagneticField.h>
+
+#include <memory>
 
 namespace gazebo
 {
@@ -64,7 +66,7 @@ namespace gazebo
     bool LoadParameters();
     
     /// \brief Ros NodeHandle pointer.
-    ros::NodeHandle* node;
+    std::unique_ptr<ros::NodeHandle> node;
     /// \brief Ros Publisher for imu data.
     ros::Publisher magnetometer_data_publisher;
     /// \brief Ros IMU message.
@@ -75,7 +77,7 @@ namespace gazebo
     /// \brief Pointer to the update event connection.
     gazebo::event::ConnectionPtr connection;
     /// \brief Pointer to the sensor.
-    sensors::MagnetometerSensor* sensor;
+    std::shared_ptr<sensors::MagnetometerSensor> sensor;
     /// \brief Pointer to the sdf config file.
     sdf::ElementPtr sdf;
 
