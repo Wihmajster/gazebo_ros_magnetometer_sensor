@@ -26,6 +26,9 @@
 #include <cmath>
 #include <ignition/math/Vector3.hh>
 #include <memory>
+#include <XYZgeomag/XYZgeomag.hpp>
+#include <chrono>
+#include <ctime>
 
 GZ_REGISTER_SENSOR_PLUGIN(gazebo::GazeboRosMagnetometerSensor)
 
@@ -165,6 +168,60 @@ namespace gazebo
         ROS_INFO_STREAM("Magnetic field: " << magnetic_field);
       }
     }
+    else if (sdf->HasElement("sphericalCoordinates"))
+    { 
+    // Load spherical_coordinates parameters
+      gazebo::physics::WorldPtr world = gazebo::physics::get_world(sensor->WorldName());
+      if (world){
+        sdf::ElementPtr spherical_coordinates = sdf->GetElement("sphericalCoordinates");
+        if (spherical_coordinates->HasElement("latitudeDeg") && spherical_coordinates->HasElement("longitudeDeg") && spherical_coordinates->HasElement("elevation")){
+          auto latitude = spherical_coordinates->Get<double>("latitudeDeg");
+          auto longitude = spherical_coordinates->Get<double>("longitudeDeg");
+          auto elevation = spherical_coordinates->Get<double>("elevation");
+          ROS_INFO_STREAM("Latitude: " << latitude);
+          ROS_INFO_STREAM("Longitude: " << longitude);
+          ROS_INFO_STREAM("Elevation: " << elevation);
+
+          // Get year for magnetic field model
+          float year;
+          if(spherical_coordinates->HasElement("year")){
+            // Get year from sdf if provided
+            year = spherical_coordinates->Get<double>("year");
+          }
+          else{
+            // Else, use current year from system clock
+            auto now = std::chrono::system_clock::now();
+            auto now_time = std::chrono::system_clock::to_time_t(now);
+            auto now_utc = *std::gmtime(&now_time);
+            year = 1900 + now_utc.tm_year + now_utc.tm_yday / 365.25;
+          }
+          ROS_INFO_STREAM("Year: " << year);
+
+          // Get magnetic field from WMM2020 model
+          geomag::Vector position = geomag::geodetic2ecef(latitude,longitude,elevation);
+          geomag::Vector mag_field = geomag::GeoMag(year,position,geomag::WMM2020);
+          geomag::Elements out = geomag::magField2Elements(mag_field, latitude, longitude);
+
+          // Get vector in ENU frame and in Tesla
+          auto magnetic_field = ignition::math::Vector3d(out.east, out.north, -out.down) * 1e-9;
+
+          // Rotate magnetic field by heading if provided
+          if (spherical_coordinates->HasElement("headingDeg")){
+            auto heading = spherical_coordinates->Get<double>("headingDeg") * M_PI / 180;
+            magnetic_field = ignition::math::Quaterniond(0,0,-heading) * magnetic_field;
+            ROS_INFO_STREAM("Heading: " << heading);
+          }
+          // Set magnetic field in world
+          world->SetMagneticField(magnetic_field);
+          ROS_INFO_STREAM("Magnetic field: " << int(magnetic_field.X() * 1e9) << "E\t" << int(magnetic_field.Y() * 1e9) << "N\t" << int(magnetic_field.Z() * 1e9) << "D");
+        }
+        else{
+          ROS_WARN_STREAM("sphericalCoordinates ignored, all three parameters (latitudeDeg, longitudeDeg, elevation) must be set");
+        }
+        
+      }
+    }
+
 
     return true;
   }
