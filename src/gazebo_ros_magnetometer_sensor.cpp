@@ -29,6 +29,7 @@
 #include <XYZgeomag/XYZgeomag.hpp>
 #include <chrono>
 #include <ctime>
+#include <string>
 
 GZ_REGISTER_SENSOR_PLUGIN(gazebo::GazeboRosMagnetometerSensor)
 
@@ -184,7 +185,7 @@ namespace gazebo
 
           // Get year for magnetic field model
           float year;
-          if(spherical_coordinates->HasElement("year")){
+          if(spherical_coordinates->HasElement("year") && spherical_coordinates->Get<std::string>("year") != ""){
             // Get year from sdf if provided
             year = spherical_coordinates->Get<double>("year");
           }
